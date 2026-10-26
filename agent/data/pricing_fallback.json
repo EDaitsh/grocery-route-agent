@@ -1,0 +1,11 @@
+{
+  "_note": "Fallback only, used when https://openrouter.ai/api/v1/models is unreachable. USD per single token. These are placeholder estimates - verify against openrouter.ai/models and update before submitting.",
+  "models": {
+    "openai/gpt-4o-mini": {"prompt": 0.00000015, "completion": 0.0000006},
+    "anthropic/claude-3.5-haiku": {"prompt": 0.0000008, "completion": 0.000004},
+    "google/gemini-2.0-flash-001": {"prompt": 0.0000001, "completion": 0.0000004},
+    "meta-llama/llama-3.3-70b-instruct": {"prompt": 0.00000012, "completion": 0.0000003},
+    "meta-llama/llama-3.3-70b-instruct:free": {"prompt": 0.0, "completion": 0.0},
+    "mock/heuristic": {"prompt": 0.0, "completion": 0.0}
+  }
+}

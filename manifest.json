@@ -1,0 +1,51 @@
+{
+  "name": "Grocery Route Agent",
+  "version": "1.0.0",
+  "description": "An agent that turns a free-text Hebrew grocery list into the shortest walking route through a specific store. It normalizes the list, matches items to the store catalog via RAG, asks the user to resolve ambiguous items (HITL), computes an optimized route with a graph algorithm, and writes verified step-by-step walking instructions.",
+  "creator_name": "YOUR NAME",
+  "contact_information": "e.daitsh@gmail.com",
+  "release_date": "2026-10-26",
+  "repository_url": "https://github.com/USERNAME/grocery-route-agent",
+  "download_url": "https://github.com/USERNAME/grocery-route-agent/releases/download/v1.0.0/agent.exe",
+  "target_audience": "Households and shoppers who do a weekly grocery run; supermarkets that want to offer in-store navigation",
+  "professional_fields": [
+    "Retail",
+    "Grocery Shopping",
+    "Indoor Navigation",
+    "Route Optimization"
+  ],
+  "tasks_capable_of_performing": [
+    "Normalizing free-text Hebrew shopping lists (typos, quantities, combined items)",
+    "Matching list items to a store product catalog (RAG)",
+    "Classifying unknown items to a likely store department",
+    "Computing the shortest in-store route (Dijkstra + 2-opt, melting items like ice cream last)",
+    "Loading a store from a simple Excel file: a map drawn in cells plus a product sheet, with validation messages in Hebrew",
+    "Writing verified walking instructions",
+    "Maintaining a weekly shopping list across sessions"
+  ],
+  "examples_of_suitable_questions": [
+    "2 חלב 3%, לחם אחיד, טחינה, עגבניות, גלידה",
+    "add שמפו, נוזל כלים  (ואחר כך: plan)",
+    "load C:\\Users\\me\\shopping_list.txt",
+    "איפה נמצאת הטחינה בחנות?"
+  ],
+  "technical_specifications": {
+    "framework": "LangGraph",
+    "llm_provider": "OpenRouter",
+    "supported_models": [
+      "meta-llama/llama-3.3-70b-instruct:free",
+      "openai/gpt-4o-mini",
+      "google/gemini-2.0-flash-001"
+    ],
+    "features_enabled": {
+      "rag": true,
+      "web_search": false,
+      "code_execution": true,
+      "mcp_support": false
+    },
+    "required_permissions": [
+      "local_file_read",
+      "local_file_write"
+    ]
+  }
+}
