@@ -33,9 +33,9 @@
     "framework": "LangGraph",
     "llm_provider": "OpenRouter",
     "supported_models": [
-      "meta-llama/llama-3.3-70b-instruct:free",
+      "nvidia/nemotron-3-ultra-550b-a55b:free",
       "openai/gpt-4o-mini",
-      "google/gemini-2.0-flash-001"
+      "google/gemini-2.5-flash-lite"
     ],
     "features_enabled": {
       "rag": true,

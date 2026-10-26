@@ -1,0 +1,19 @@
+﻿model,case,judge_model,seconds,error,recall,precision,evaluator_passed,rewrite_attempts,route_m,input_tokens,output_tokens,cost_actual_usd,cost_theoretical_usd,relevance,accuracy,completeness,format,judge_score,judge_reason
+nvidia/nemotron-3-ultra-550b-a55b:free,short_basic,openai/gpt-4o-mini,88.91,חרגתם ממגבלת הקצב של OpenRouter (429). המתינו מעט או החליפו מודל.,,,,,,,,,,,,,,,
+nvidia/nemotron-3-ultra-550b-a55b:free,typos_and_qty,openai/gpt-4o-mini,86.2,חרגתם ממגבלת הקצב של OpenRouter (429). המתינו מעט או החליפו מודל.,,,,,,,,,,,,,,,
+nvidia/nemotron-3-ultra-550b-a55b:free,weekly_long,openai/gpt-4o-mini,85.94,חרגתם ממגבלת הקצב של OpenRouter (429). המתינו מעט או החליפו מודל.,,,,,,,,,,,,,,,
+nvidia/nemotron-3-ultra-550b-a55b:free,free_text,openai/gpt-4o-mini,86.05,חרגתם ממגבלת הקצב של OpenRouter (429). המתינו מעט או החליפו מודל.,,,,,,,,,,,,,,,
+nvidia/nemotron-3-ultra-550b-a55b:free,frozen_first_in_list,openai/gpt-4o-mini,86.18,חרגתם ממגבלת הקצב של OpenRouter (429). המתינו מעט או החליפו מודל.,,,,,,,,,,,,,,,
+nvidia/nemotron-3-ultra-550b-a55b:free,with_unknown,openai/gpt-4o-mini,85.78,חרגתם ממגבלת הקצב של OpenRouter (429). המתינו מעט או החליפו מודל.,,,,,,,,,,,,,,,
+openai/gpt-4o-mini,short_basic,openai/gpt-4o-mini,7.1,,1.0,1.0,True,1,61.6,1746,263,0.00042,0.00042,5,5,5,5,5.0,"הפלט מספק הוראות הליכה ברורות ומדויקות, כולל כל המוצרים הנדרשים בפורמט מסודר."
+openai/gpt-4o-mini,typos_and_qty,openai/gpt-4o-mini,8.43,,1.0,1.0,True,1,107.7,1992,340,0.000503,0.000503,5,3,5,5,4.5,"הפלט ממוקד בהוראות הליכה, אך יש טעות במיפוי המוצר 'טחינה'."
+openai/gpt-4o-mini,weekly_long,openai/gpt-4o-mini,15.61,,1.0,1.0,True,1,172.9,3875,1001,0.001182,0.001182,5,3,3,5,4.0,"הפלט כולל הוראות הליכה ממוקדות, אך יש חוסר במוצר 'בצל' והדיוק במיקומים לא מושלם."
+openai/gpt-4o-mini,free_text,openai/gpt-4o-mini,8.77,,1.0,1.0,True,1,76.1,1967,324,0.000489,0.000489,5,5,5,5,5.0,הפלט מספק הוראות הליכה ברורות ומדויקות עם כל המוצרים הנדרשים והפורמט הנכון.
+openai/gpt-4o-mini,frozen_first_in_list,openai/gpt-4o-mini,8.86,,1.0,1.0,True,1,97.9,2152,388,0.000556,0.000556,5,3,3,5,4.0,"הפלט כולל הוראות הליכה ממוקדות, אך יש חוסר במוצר מים והוזכרו מוצרים לא קיימים."
+openai/gpt-4o-mini,with_unknown,openai/gpt-4o-mini,7.17,,1.0,1.0,True,1,74.1,1949,332,0.000492,0.000492,5,3,3,5,4.0,"הפלט ממוקד בהוראות הליכה, אך יש טעות במיפוי המוצרים וחסר מוצר אחד."
+google/gemini-2.5-flash-lite,short_basic,openai/gpt-4o-mini,3.7,,1.0,1.0,True,1,61.6,1920,355,0.000334,0.000334,5,3,3,5,4.0,"הפלט מספק הוראות הליכה ממוקדות, אך חסר מוצר אחד (ביצים) ולא דווח על חוסר במוצר."
+google/gemini-2.5-flash-lite,typos_and_qty,openai/gpt-4o-mini,3.7,,1.0,1.0,True,1,107.7,2193,431,0.000392,0.000392,5,3,3,4,3.75,"הפלט כולל הוראות הליכה ממוקדות, אך יש טעות במיפוי המוצרים ובחסר מוצר אחד."
+google/gemini-2.5-flash-lite,weekly_long,openai/gpt-4o-mini,5.54,,1.0,1.0,True,1,172.9,4260,1236,0.00092,0.00092,5,3,3,5,4.0,"הפלט כולל הוראות הליכה ממוקדות, אך ישנן טעויות במיפוי המוצרים וחסרים מוצרים."
+google/gemini-2.5-flash-lite,free_text,openai/gpt-4o-mini,3.81,,1.0,1.0,True,1,76.1,2166,444,0.000394,0.000394,5,5,5,5,5.0,"הפלט מספק הוראות הליכה ברורות ומדויקות, כולל כל המוצרים הנדרשים בפורמט מסודר."
+google/gemini-2.5-flash-lite,frozen_first_in_list,openai/gpt-4o-mini,3.93,,1.0,1.0,True,1,97.9,2367,530,0.000449,0.000449,5,3,3,5,4.0,"הפלט כולל הוראות הליכה ממוקדות, אך יש חוסר במוצר מים והיו טעויות במיפוי."
+google/gemini-2.5-flash-lite,with_unknown,openai/gpt-4o-mini,24.82,,1.0,1.0,True,1,74.1,2138,455,0.000396,0.000396,5,3,3,5,4.0,"הפלט ממוקד בהוראות הליכה, אך יש טעות במיפוי המוצרים וחסרים מוצרים ברשימה."

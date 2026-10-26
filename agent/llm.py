@@ -16,6 +16,10 @@ from . import config, pricing
 # הנוד הנוכחי - מתעדכן ע"י הדקורטור ב-nodes.py, כדי לשייך כל קריאה לנוד
 current_node: contextvars.ContextVar[str] = contextvars.ContextVar("current_node", default="-")
 
+# ניסיונות חוזרים על 429 (מגבלת קצב): 5, 10, 20, 40 שניות
+RATE_LIMIT_RETRIES = 4
+RATE_LIMIT_WAIT = 5
+
 
 class AgentError(Exception):
     """שגיאה עם הודעה ידידותית למשתמש."""
@@ -122,12 +126,18 @@ class LLM:
             in_tok, out_tok = (len(system) + len(user)) // 4, len(text) // 4
         else:
             from langchain_core.messages import HumanMessage, SystemMessage
-            try:
-                resp = self._get_client().invoke([SystemMessage(system), HumanMessage(user)])
-            except AgentError:
-                raise
-            except Exception as e:  # רשת, הרשאות, מכסה, מודל לא קיים
-                raise AgentError(_friendly_api_error(e)) from e
+            for attempt in range(RATE_LIMIT_RETRIES + 1):
+                try:
+                    resp = self._get_client().invoke([SystemMessage(system), HumanMessage(user)])
+                    break
+                except AgentError:
+                    raise
+                except Exception as e:  # רשת, הרשאות, מכסה, מודל לא קיים
+                    # 429 במודלים חינמיים הוא לרוב זמני - ממתינים ומנסים שוב (backoff)
+                    if "429" in str(e) and attempt < RATE_LIMIT_RETRIES:
+                        time.sleep(RATE_LIMIT_WAIT * 2 ** attempt)
+                        continue
+                    raise AgentError(_friendly_api_error(e)) from e
             text = resp.content if isinstance(resp.content, str) else str(resp.content)
             usage = resp.usage_metadata or {}
             in_tok, out_tok = usage.get("input_tokens", 0), usage.get("output_tokens", 0)

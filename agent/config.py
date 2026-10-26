@@ -27,7 +27,7 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
 # מודל ברירת מחדל לאייג'נט. רשימת המודלים החינמיים משתנה - בדקו ב-openrouter.ai/models
-DEFAULT_MODEL = os.getenv("AGENT_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+DEFAULT_MODEL = os.getenv("AGENT_MODEL", "nvidia/nemotron-3-ultra-550b-a55b:free")
 # מודל שופט קבוע ל-evals (LLM-as-judge)
 JUDGE_MODEL = os.getenv("JUDGE_MODEL", "openai/gpt-4o-mini")
 # מודל ייחוס לחישוב "עלות תיאורטית" למודל חינמי שאין לו גרסה בתשלום
