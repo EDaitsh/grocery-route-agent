@@ -211,7 +211,7 @@ class Session:
             show(f"מודל פעיל: {'mock/heuristic (מצב הדגמה)' if config.mock_enabled() else self.model}")
         elif cmd == "tools":
             show("הרחבות פעילות:\n  RAG - שליפה מקטלוג מוצרי החנות (TF-IDF על תווים, מקומי)\n"
-                 "  Code-Exec - חישוב מסלול (Dijkstra + 2-opt) על מפת החנות\n"
+                 "  Route Tool - כלי פנימי לחישוב מסלול (Dijkstra + 2-opt) על מפת החנות\n"
                  "  File I/O - קריאת רשימה מקובץ, שמירת מסלול (באישור)\n  MCP - לא בשימוש")
         elif cmd == "cost":
             show(self.tracker.report())

@@ -40,7 +40,7 @@
     "features_enabled": {
       "rag": true,
       "web_search": false,
-      "code_execution": true,
+      "code_execution": false,
       "mcp_support": false
     },
     "required_permissions": [

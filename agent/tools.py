@@ -2,7 +2,7 @@
 
 1. StoreRAG  - שליפה (Retrieval) מקטלוג המוצרים של החנות. אינדקס TF-IDF על n-grams של תווים,
                שעמיד לשגיאות כתיב ולתחיליות בעברית, ופועל מקומית בלי API של embeddings.
-2. StoreMap  - "Code-Exec": חישוב מסלול קצר בחנות. Dijkstra בין נקודות + nearest-neighbor
+2. StoreMap  - כלי פנימי (Route Tool): חישוב מסלול קצר בחנות. Dijkstra בין נקודות + nearest-neighbor
                ו-2-opt לסדר העצירות, עם אילוץ: מוצרים שמסומנים "לאסוף בסוף" (גלידה) אחרונים לפני הקופות.
                המפה נטענת מציור בתאי אקסל (store.xlsx) או מגרף ב-map.json.
 3. save_text - כתיבת קובץ (פעולה רגישה, מופעלת רק אחרי אישור HITL בגרף).
