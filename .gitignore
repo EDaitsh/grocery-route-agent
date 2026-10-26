@@ -7,3 +7,4 @@ dist/
 .pytest_cache/
 route_*.txt
 session_summary_*.txt
+~$*
