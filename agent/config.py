@@ -18,6 +18,8 @@ def _base_dir() -> Path:
 BASE_DIR = _base_dir()
 DATA_DIR = BASE_DIR / "data"
 STORES_DIR = DATA_DIR / "stores"
+# ממשק ה-Web הבנוי (npm run build בתיקייה web/); בתוך ה-exe הוא נארז ל-agent/web_dist
+WEB_DIST = BASE_DIR / "web_dist" if getattr(sys, "frozen", False) else BASE_DIR.parent / "web" / "dist"
 
 # .env נטען מהתיקייה שממנה מריצים (ליד ה-exe), ואם אין - משורש הפרויקט
 load_dotenv(Path.cwd() / ".env")

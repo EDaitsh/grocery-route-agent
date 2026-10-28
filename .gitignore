@@ -8,3 +8,4 @@ dist/
 route_*.txt
 session_summary_*.txt
 ~$*
+node_modules/

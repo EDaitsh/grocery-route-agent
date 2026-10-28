@@ -122,18 +122,6 @@ def terminal_hitl(payload: dict):
     return None
 
 
-# ---------------------------------------------------------------- רשימה שבועית
-def _read_list() -> list[str]:
-    if not config.LIST_FILE.exists():
-        return []
-    return [l.strip() for l in config.LIST_FILE.read_text(encoding="utf-8").splitlines() if l.strip()]
-
-
-def _write_list(items: list[str]) -> None:
-    config.LIST_FILE.parent.mkdir(parents=True, exist_ok=True)
-    config.LIST_FILE.write_text("\n".join(items) + ("\n" if items else ""), encoding="utf-8")
-
-
 # ---------------------------------------------------------------- לולאה ראשית
 class Session:
     def __init__(self):
@@ -168,25 +156,25 @@ class Session:
             if not new:
                 show("כתבו פריטים אחרי add, מופרדים בפסיקים.", "warn")
             else:
-                _write_list(_read_list() + new)
-                show(f"נוספו {len(new)} פריטים. ברשימה כעת {len(_read_list())} פריטים.", "ok")
+                tools.write_weekly_list(tools.read_weekly_list() + new)
+                show(f"נוספו {len(new)} פריטים. ברשימה כעת {len(tools.read_weekly_list())} פריטים.", "ok")
         elif cmd == "list":
-            items = _read_list()
+            items = tools.read_weekly_list()
             show("\n".join(f"{i}. {x}" for i, x in enumerate(items, 1)) or "הרשימה ריקה.")
         elif cmd == "remove":
-            items = _read_list()
+            items = tools.read_weekly_list()
             if arg.isdigit() and 1 <= int(arg) <= len(items):
                 removed = items.pop(int(arg) - 1)
-                _write_list(items)
+                tools.write_weekly_list(items)
                 show(f"הוסר: {removed}", "ok")
             else:
                 show("מספר פריט לא תקין. השתמשו ב-list כדי לראות את המספרים.", "warn")
         elif cmd == "clear":
             if yes_no("[HITL] לרוקן את כל הרשימה השבועית?"):
-                _write_list([])
+                tools.write_weekly_list([])
                 show("הרשימה רוקנה.", "ok")
         elif cmd == "plan":
-            items = _read_list()
+            items = tools.read_weekly_list()
             if not items:
                 show("הרשימה השבועית ריקה. הוסיפו פריטים עם add.", "warn")
             else:

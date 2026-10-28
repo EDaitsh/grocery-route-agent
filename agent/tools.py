@@ -157,12 +157,15 @@ class StoreMap:
     """גרף הליכה בחנות. כל אזור (עצירה אפשרית) ממופה לצומת בגרף."""
 
     def __init__(self, name: str, adj: dict[str, list[tuple[str, float]]], labels: dict[str, str],
-                 start: str, end: str, zone_node: dict[str, str] | None = None):
+                 start: str, end: str, zone_node: dict[str, str] | None = None,
+                 coords: dict[str, tuple[float, float]] | None = None, drawing: dict | None = None):
         self.name = name
         self.adj = adj
         self.labels = labels                          # אזור -> שם לתצוגה
         self.start, self.end = start, end
         self._zone_node = zone_node or {z: z for z in labels}
+        self._coords = coords or {}                   # צומת -> (x, y), למפות מ-map.json
+        self._drawing = drawing or {}                 # צורת החנות לציור בממשק ה-Web
         self._sp_cache: dict[str, tuple[dict, dict]] = {}
 
     @classmethod
@@ -174,11 +177,29 @@ class StoreMap:
             d = w[0] if w else math.hypot(nodes[a]["x"] - nodes[b]["x"], nodes[a]["y"] - nodes[b]["y"])
             adj[a].append((b, d))
             adj[b].append((a, d))
-        return cls(data["store_name"], adj, {n: v["label"] for n, v in nodes.items()}, data["start"], data["end"])
+        return cls(data["store_name"], adj, {n: v["label"] for n, v in nodes.items()}, data["start"], data["end"],
+                   coords={n: (v["x"], v["y"]) for n, v in nodes.items()},
+                   drawing={"kind": "graph", "edges": [[a, b] for a, b, *_ in data["edges"]]})
 
     @property
     def zones(self) -> set[str]:
         return set(self.labels)
+
+    def point(self, node: str) -> tuple[float, float]:
+        """מיקום לציור: (x, y) מ-map.json, או (עמודה, שורה) של התא במפת אקסל."""
+        node = self._zone_node.get(node, node)
+        if node in self._coords:
+            return self._coords[node]
+        r, c = node.split(",")
+        return float(c), float(r)
+
+    def drawing(self) -> dict:
+        """צורת החנות לציור: קירות ואזורים (אקסל) או קטעי מעברים (map.json), ומיקום כל אזור."""
+        out = {"name": self.name, "start": self.start, "end": self.end, **self._drawing,
+               "zones": {z: {"label": self.label(z), "at": self.point(z)} for z in self.labels}}
+        if out.get("kind") == "graph":
+            out["edges"] = [[*self.point(a), *self.point(b)] for a, b in out["edges"]]
+        return out
 
     def label(self, zone: str) -> str:
         return self.labels[zone]
@@ -346,8 +367,12 @@ def _grid_map(ws, default_name: str, problems: list[str]) -> StoreMap | None:
     if not (start and end):
         return None
 
+    drawing = {"kind": "grid", "rows": [min(rows), max(rows)], "cols": [min(cols), max(cols)],
+               "walls": sorted([r, c] for r in range(min(rows), max(rows) + 1)
+                               for c in range(min(cols), max(cols) + 1) if (r, c) not in walk),
+               "zone_cells": {z: sorted([r, c] for r, c in cells) for z, cells in zone_cells.items()}}
     smap = StoreMap(name, adj, {z: z for z in zone_cells}, start, end,
-                    {z: center(cells) for z, cells in zone_cells.items()})
+                    {z: center(cells) for z, cells in zone_cells.items()}, drawing=drawing)
     for z in sorted(zone_cells):
         if smap.dist(start, z) == math.inf:
             problems.append(f"אין דרך מהכניסה לאזור '{z}': בדקו שתאי X לא חוסמים אותו מכל הכיוונים")
@@ -482,6 +507,17 @@ def read_list_file(path: str | Path) -> str:
     if p.stat().st_size > 100_000:
         raise ValueError("הקובץ גדול מדי לרשימת קניות (מעל 100KB).")
     return p.read_text(encoding="utf-8")
+
+
+def read_weekly_list() -> list[str]:
+    if not config.LIST_FILE.exists():
+        return []
+    return [l.strip() for l in config.LIST_FILE.read_text(encoding="utf-8").splitlines() if l.strip()]
+
+
+def write_weekly_list(items: list[str]) -> None:
+    config.LIST_FILE.parent.mkdir(parents=True, exist_ok=True)
+    config.LIST_FILE.write_text("\n".join(items) + ("\n" if items else ""), encoding="utf-8")
 
 
 def save_text(path: str | Path, text: str) -> Path:

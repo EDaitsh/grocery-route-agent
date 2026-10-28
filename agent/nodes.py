@@ -309,7 +309,8 @@ def plan_route(state: AgentState, config: RunnableConfig) -> dict:
     r = smap.plan(state["resolved"])
     saved = r.naive_m - r.total_m
     info(f"[TOOL] מסלול: {r.total_m} מ' (לעומת {r.naive_m} מ' לפי סדר הרשימה, חיסכון {saved:.0f} מ')")
-    return {"route": {"store": smap.name, "stops": r.stops, "total_m": r.total_m, "naive_m": r.naive_m}}
+    return {"route": {"store": smap.name, "stops": r.stops, "total_m": r.total_m, "naive_m": r.naive_m,
+                      "path": [smap.point(p) for p in r.path_nodes]}}
 
 
 # ================================================================ 7. ניסוח הוראות [LLM]
@@ -411,7 +412,7 @@ def confirm_save(state: AgentState, config: RunnableConfig) -> dict:
     if not state.get("route"):
         return {}
     default = str(Path.cwd() / f"route_{datetime.now():%Y%m%d_%H%M}.txt")
-    answer = interrupt({"kind": "confirm_save", "path": default})
+    answer = interrupt({"kind": "confirm_save", "path": default, "text": state["final_text"]})
     if not answer:
         return {}
     path = answer if isinstance(answer, str) else default

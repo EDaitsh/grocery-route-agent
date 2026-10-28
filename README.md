@@ -81,6 +81,7 @@ grocery-route-agent/
 │   ├── mock.py           # LLM מדומה למצב הדגמה ובדיקות
 │   ├── config.py
 │   ├── cli.py            # entrypoint של ה-CLI
+│   ├── server.py         # שרת FastAPI לממשק ה-Web (SSE + HITL בדפדפן)
 │   └── data/stores/
 │       ├── demo_store/store.xlsx               # חנות הדמו: ציור בתאים + מחלקות + חריגים
 │       └── demo_store_json/{map.json, catalog.csv}   # אותה חנות בפורמט הישן (גרף)
@@ -91,11 +92,14 @@ grocery-route-agent/
 │   ├── rubric.md         # rubric ל-LLM-as-judge
 │   ├── data/             # רשימות בדיקה עם ground truth, שאלות מחוץ לתחום
 │   └── results/          # פלטי CSV
-├── tests/test_agent.py
+├── web/                  # ממשק Web/Desktop: React + Vite (נבנה ל-web/dist)
+├── tests/                # test_agent.py, test_server.py
 ├── manifest.json
 ├── requirements.txt
 ├── build_exe.bat
-├── run_agent.py          # entrypoint ל-PyInstaller
+├── run_agent.py          # entrypoint ל-PyInstaller (CLI)
+├── run_web.py            # entrypoint לממשק ה-Web (agent-web.exe)
+├── build_web_exe.bat
 ├── check_store.py        # בדיקת קובץ חנות חדש
 ├── store_template.xlsx   # תבנית ריקה לחנות חדשה
 └── .env.example
@@ -196,6 +200,34 @@ python evals/scope_eval.py         # refusal rate על 10 שאלות מחוץ ל
 | `google/gemini-2.5-flash-lite` | 100% | 0% |
 
 - ריצה שנכשלה (למשל 429) לא נספרת בחישוב, ומספר הריצות שנכשלו מדווח בנפרד.
+
+## ממשק Web / Desktop (מסלול B)
+
+אותו גרף ואותם נודים כמו ב-CLI, עם ממשק גרפי בעברית. שרת FastAPI מקומי עוטף את `run_agent`, וממשק React מתחבר אליו.
+החלון נפתח כאפליקציה נפרדת (Edge במצב `--app`), או בלשונית דפדפן רגילה עם `--browser`.
+
+```bash
+pip install -r requirements.txt
+cd web && npm install && npm run build && cd ..
+python run_web.py               # או: agent-web.exe
+```
+
+| דרישה | בממשק |
+|---|---|
+| Streaming | השלבים בגרף מוצגים בזמן אמת (Server-Sent Events), כולל הודעות GATE / TOOL / EVAL |
+| HITL | שאלות הבהרה עם בחירת אפשרות, ואישור לפני שמירת המסלול לקובץ. הגרף עוצר ב-`interrupt` עד לתשובה מהדפדפן |
+| קבצים | גרירת קובץ txt / csv / md לחלון, או כפתור 📎 |
+| עזרה | כפתור `?` בסרגל העליון |
+| עלויות | עלות בפועל ותיאורטית, טוקנים, ופירוט לפי נוד בכל משימה. סיכום מצטבר בסרגל העליון |
+| שגיאות | הודעה ברורה בכרטיס המשימה (מפתח חסר, 429, מודל לא קיים וכו') |
+| תקציר שיחה | כפתור "תקציר שיחה" מוריד קובץ טקסט |
+| הרחבות | רשימת ההרחבות הפעילות בצד (MCP לא בשימוש) |
+
+בנוסף: **מפת החנות עם המסלול** מצוירת מתוך קובץ האקסל של החנות, ויש ניהול של הרשימה השבועית מהצד.
+
+**פיתוח:** `python run_web.py` בחלון אחד, ו-`cd web && npm run dev` בחלון שני (Vite מעביר את `/api` לשרת).
+
+**בניית exe:** `build_web_exe.bat` יוצר את `distgent-web.exe`, שכולל את הממשק הבנוי. יש להניח `.env` ליד הקובץ, כמו ב-CLI.
 
 ## בדיקות
 ```bash

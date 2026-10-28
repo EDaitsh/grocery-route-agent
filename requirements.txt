@@ -5,5 +5,7 @@ langsmith>=0.4
 python-dotenv>=1.0
 python-bidi>=0.5
 openpyxl>=3.1
+fastapi>=0.115
+uvicorn>=0.30
 pyinstaller>=6.0
 pytest>=8.0
