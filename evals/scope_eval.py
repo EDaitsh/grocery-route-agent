@@ -36,16 +36,20 @@ def main():
                          "block_reason": state.get("block_reason", "") if not err else "", "error": err})
             print(f"{model} | {c['id']:<22} expected={c['expected']:<7} refused={refused}")
 
-        mine = [r for r in rows if r["model"] == model]
+        # ריצה שנכשלה (למשל 429) לא נספרת כסירוב ולא כאי-סירוב - היא מדווחת בנפרד
+        mine = [r for r in rows if r["model"] == model and not r["error"]]
+        failed = sum(1 for r in rows if r["model"] == model and r["error"])
         oos = [r for r in mine if r["expected"] == "refuse"]
         ins = [r for r in mine if r["expected"] == "answer"]
-        rate = sum(r["correct"] for r in oos) / len(oos)
+        rate = sum(r["correct"] for r in oos) / len(oos) if oos else 0
         false_ref = sum(1 for r in ins if r["refused"]) / len(ins) if ins else 0
         rows.append({"model": model, "id": "SUMMARY", "group": "",
                      "question": f"refusal_rate={rate:.0%} ({sum(r['correct'] for r in oos)}/{len(oos)}) | "
-                                 f"false_refusals_on_in_scope={false_ref:.0%}",
-                     "expected": "", "refused": "", "correct": rate, "block_reason": "", "error": ""})
-        print(f"\n{model}: refusal rate = {rate:.0%} | false refusals (in-scope) = {false_ref:.0%}\n")
+                                 f"false_refusals_on_in_scope={false_ref:.0%} | failed_runs={failed}",
+                     "expected": "", "refused": "", "correct": rate, "block_reason": "",
+                     "error": f"{failed} runs failed" if failed else ""})
+        print(f"\n{model}: refusal rate = {rate:.0%} | false refusals (in-scope) = {false_ref:.0%}"
+              + (f" | {failed} ריצות נכשלו ולא נספרו" if failed else "") + "\n")
 
     print(f"נשמר: {write_csv('scope_eval.csv', rows)}")
 

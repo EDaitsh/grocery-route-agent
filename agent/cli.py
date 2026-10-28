@@ -92,8 +92,8 @@ HELP = """
   help / ?            המדריך הזה
   exit                יציאה
 
-במהלך הריצה האייג'נט עשוי לעצור ולשאול: לבחור בין מוצרים דומים, לאשר עצירה במחלקה
-למוצר שלא נמצא בקטלוג, ולאשר שמירת המסלול לקובץ.
+במהלך הריצה האייג'נט עשוי לעצור ולשאול: באיזו מחלקה לחפש פריט כשלא ברור איפה הוא,
+לבחור בין מוצרים שנמצאים במקומות שונים, ולאשר שמירת המסלול לקובץ.
 """
 
 
@@ -103,20 +103,16 @@ def terminal_hitl(payload: dict):
         show("\n[HITL] נדרשת הבהרה לגבי כמה פריטים:", "warn")
         answers = {}
         for q in payload["questions"]:
-            if q["type"] == "choose":
-                show(f"\nלמה התכוונתם ב-'{q['text']}'?")
-                for i, o in enumerate(q["options"], 1):
-                    show(f"  {i}. {o['name']}")
-                show("  0. לדלג על הפריט")
-                while True:
-                    a = ask("בחרו מספר:")
-                    if a.isdigit() and 0 <= int(a) <= len(q["options"]):
-                        break
-                answers[str(q["idx"])] = q["options"][int(a) - 1]["id"] if int(a) else None
-            else:
-                ok = yes_no(f"\n'{q['text']}' לא נמצא בקטלוג. ייתכן שהוא במחלקת {q['category']} "
-                            f"({q['location_label']}). להוסיף עצירה לבדיקה?")
-                answers[str(q["idx"])] = "yes" if ok else None
+            show(f"\nלמה התכוונתם ב-'{q['text']}'?" if q["type"] == "choose"
+                 else f"\nבאיזו מחלקה לחפש את '{q['text']}'?")
+            for i, o in enumerate(q["options"], 1):
+                show(f"  {i}. {o['name']}")
+            show("  0. לדלג על הפריט")
+            while True:
+                a = ask("בחרו מספר:")
+                if a.isdigit() and 0 <= int(a) <= len(q["options"]):
+                    break
+            answers[str(q["idx"])] = q["options"][int(a) - 1]["id"] if int(a) else None
         return answers
     if payload["kind"] == "confirm_save":
         if not yes_no(f"\n[HITL] לשמור את המסלול לקובץ?\n  {payload['path']}"):
@@ -210,7 +206,7 @@ class Session:
                 self.model = arg
             show(f"מודל פעיל: {'mock/heuristic (מצב הדגמה)' if config.mock_enabled() else self.model}")
         elif cmd == "tools":
-            show("הרחבות פעילות:\n  RAG - שליפה מקטלוג מוצרי החנות (TF-IDF על תווים, מקומי)\n"
+            show("הרחבות פעילות:\n  RAG - שליפה ממחלקות החנות ומרשימת המוצרים החריגים (TF-IDF על תווים, מקומי)\n"
                  "  Route Tool - כלי פנימי לחישוב מסלול (Dijkstra + 2-opt) על מפת החנות\n"
                  "  File I/O - קריאת רשימה מקובץ, שמירת מסלול (באישור)\n  MCP - לא בשימוש")
         elif cmd == "cost":

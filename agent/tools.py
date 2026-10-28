@@ -1,6 +1,7 @@
 """הרחבות האייג'נט (לא LLM):
 
-1. StoreRAG  - שליפה (Retrieval) מקטלוג המוצרים של החנות. אינדקס TF-IDF על n-grams של תווים,
+1. StoreRAG  - שליפה (Retrieval) מהחנות: מחלקות (עם דוגמאות למה שנמכר בהן) ורשימה אופציונלית של
+               מוצרים ידועים - בעיקר חריגים שלא נמצאים במחלקה הצפויה. אינדקס TF-IDF על n-grams של תווים,
                שעמיד לשגיאות כתיב ולתחיליות בעברית, ופועל מקומית בלי API של embeddings.
 2. StoreMap  - כלי פנימי (Route Tool): חישוב מסלול קצר בחנות. Dijkstra בין נקודות + nearest-neighbor
                ו-2-opt לסדר העצירות, עם אילוץ: מוצרים שמסומנים "לאסוף בסוף" (גלידה) אחרונים לפני הקופות.
@@ -59,6 +60,16 @@ class Product:
                 "location": self.location, "collect_last": self.collect_last}
 
 
+@dataclass
+class Department:
+    name: str
+    location: str
+    examples: list[str]   # מה נמכר במחלקה. משמש את ה-LLM לשיוך ואת ה-RAG לשליפה
+
+    def as_dict(self) -> dict:
+        return {"name": self.name, "location": self.location}
+
+
 def read_catalog_csv(path: Path) -> list[Product]:
     with open(path, encoding="utf-8") as f:
         return [Product(row["id"], row["name"], [a for a in row["aliases"].split("|") if a],
@@ -66,46 +77,71 @@ def read_catalog_csv(path: Path) -> list[Product]:
                 for row in csv.DictReader(f)]
 
 
-class StoreRAG:
-    def __init__(self, products: list[Product]):
-        self.products: dict[str, Product] = {p.id: p for p in products}
-        # כל וריאציית שם (שם + כינויים) היא "מסמך" נפרד, והציון של מוצר הוא המקסימום ביניהם
-        self._docs: list[tuple[str, Counter]] = []
+def departments_from_products(products: list[Product]) -> list[Department]:
+    """לחנות בפורמט הישן (קטלוג מלא בלי מחלקות): כל קטגוריה היא מחלקה, במיקום הנפוץ של המוצרים שלה."""
+    by_cat: dict[str, list[Product]] = {}
+    for p in products:
+        by_cat.setdefault(p.category, []).append(p)
+    return [Department(cat, Counter(p.location for p in ps).most_common(1)[0][0],
+                       list(dict.fromkeys(v for p in ps for v in (p.name, *p.aliases))))
+            for cat, ps in by_cat.items()]
+
+
+class _CharIndex:
+    """TF-IDF על n-grams של תווים. כל וריאציית שם היא "מסמך" נפרד, והציון של רשומה הוא המקסימום ביניהם."""
+
+    def __init__(self, entries: dict[str, list[str]]):
+        docs: list[tuple[str, Counter]] = []
         df: Counter = Counter()
-        for p in self.products.values():
-            for variant in [p.name, *p.aliases]:
+        self._exact: dict[str, list[str]] = {}
+        for key, variants in entries.items():
+            for variant in variants:
                 grams = _ngrams(variant)
-                self._docs.append((p.id, grams))
+                docs.append((key, grams))
                 df.update(grams.keys())
-        n_docs = len(self._docs)
-        self._idf = {g: math.log((1 + n_docs) / (1 + c)) + 1 for g, c in df.items()}
-        self._vecs = [(pid, self._weigh(g)) for pid, g in self._docs]
-        self._exact = {}
-        for p in self.products.values():
-            for variant in [p.name, *p.aliases]:
-                self._exact.setdefault(normalize(variant), []).append(p.id)
+                self._exact.setdefault(normalize(variant), []).append(key)
+        self._idf = {g: math.log((1 + len(docs)) / (1 + c)) + 1 for g, c in df.items()}
+        self._vecs = [(key, self._weigh(g)) for key, g in docs]
 
     def _weigh(self, grams: Counter) -> dict[str, float]:
         vec = {g: c * self._idf.get(g, 1.0) for g, c in grams.items()}
         norm = math.sqrt(sum(v * v for v in vec.values())) or 1.0
         return {g: v / norm for g, v in vec.items()}
 
-    def search(self, query: str, k: int = 3) -> list[dict]:
-        """מחזיר עד k מוצרים מועמדים עם ציון 0..1."""
+    def search(self, query: str, k: int) -> list[tuple[str, float]]:
         q = self._weigh(_ngrams(query))
         best: dict[str, float] = {}
-        for pid, vec in self._vecs:
+        for key, vec in self._vecs:
             s = sum(w * vec.get(g, 0.0) for g, w in q.items())
-            if s > best.get(pid, 0.0):
-                best[pid] = s
+            if s > best.get(key, 0.0):
+                best[key] = s
         # התאמה מדויקת לשם או לכינוי מקבלת ציון מלא
-        for pid in self._exact.get(normalize(query), []):
-            best[pid] = 1.0
+        for key in dict.fromkeys(self._exact.get(normalize(query), [])):
+            best[key] = 1.0
         ranked = sorted(best.items(), key=lambda x: -x[1])[:k]
-        return [{**self.products[pid].as_dict(), "score": round(score, 3)} for pid, score in ranked if score > 0.05]
+        return [(key, round(score, 3)) for key, score in ranked if score > 0.05]
+
+
+class StoreRAG:
+    def __init__(self, departments: list[Department], products: list[Product] = ()):
+        self.departments: dict[str, Department] = {d.name: d for d in departments}
+        self.products: dict[str, Product] = {p.id: p for p in products}
+        self._dep_index = _CharIndex({d.name: [d.name, *d.examples] for d in departments})
+        self._prod_index = _CharIndex({p.id: [p.name, *p.aliases] for p in products})
+
+    def search(self, query: str, k: int = 3) -> list[dict]:
+        """מחזיר עד k מוצרים ידועים מועמדים עם ציון 0..1."""
+        return [{**self.products[pid].as_dict(), "score": s} for pid, s in self._prod_index.search(query, k)]
+
+    def search_departments(self, query: str, k: int = 3) -> list[dict]:
+        """מחזיר עד k מחלקות שהדוגמאות שלהן הכי דומות לפריט, עם ציון 0..1."""
+        return [{**self.departments[n].as_dict(), "score": s} for n, s in self._dep_index.search(query, k)]
 
     def get(self, pid: str) -> Product | None:
         return self.products.get(pid)
+
+    def department(self, name: str) -> Department | None:
+        return self.departments.get(name)
 
 
 # ---------------------------------------------------------------- מפה ומסלול
@@ -230,13 +266,17 @@ class StoreMap:
 # ---------------------------------------------------------------- קובץ חנות באקסל
 # לשונית "מפת החנות": ציור בתאים, כל תא בערך מטר על מטר. תא ריק = מעבר הליכה, X = מדף/קיר,
 # טקסט = אזור (המקום שבו הלקוח עומד כשהוא לוקח מוצרים). שורה 1 להגדרות, הציור מתחיל בשורה 3.
-# לשונית "מוצרים": שורה לכל מוצר, עמודת "אזור" מפנה לטקסט שבציור.
-MAP_SHEET, PRODUCTS_SHEET = "מפת החנות", "מוצרים"
+# לשונית "מחלקות": שורה לכל מחלקה, עמודת "אזור" מפנה לטקסט שבציור, ודוגמאות למה שנמכר בה.
+# לשונית "חריגים" (לא חובה): מוצרים שלא נמצאים במחלקה הצפויה (למשל סוללות ליד הקופות).
+# בפורמט הקודם הייתה לשונית "מוצרים" עם קטלוג מלא - היא עדיין נתמכת, והמחלקות נגזרות ממנה.
+MAP_SHEET, DEPARTMENTS_SHEET, PRODUCTS_SHEET, LEGACY_PRODUCTS_SHEET = "מפת החנות", "מחלקות", "חריגים", "מוצרים"
 _WALL = {"x", "×", "#"}
 _ENTRANCE, _CHECKOUT = ("כניסה",), ("קופות", "קופה")
 _YES = {"1", "כן", "v", "✓", "x", "true"}
+_LIST_SEP = re.compile(r"\s*[,|،]\s*")
 _PRODUCT_COLS = {"id": ("מק\"ט", "מק״ט", "מקט"), "name": ("שם המוצר",), "aliases": ("שמות נוספים",),
                  "category": ("קטגוריה",), "location": ("אזור",), "last": ("לאסוף בסוף",)}
+_DEPARTMENT_COLS = {"name": ("מחלקה",), "location": ("אזור",), "examples": ("מה נמכר כאן", "דוגמאות")}
 
 
 class StoreFileError(ValueError):
@@ -314,31 +354,63 @@ def _grid_map(ws, default_name: str, problems: list[str]) -> StoreMap | None:
     return smap
 
 
-def _xlsx_products(ws, smap: StoreMap | None, problems: list[str]) -> list[Product]:
+def _rows(ws, cols: dict[str, tuple[str, ...]], required: tuple[str, ...], problems: list[str]):
+    """מחזיר (מספר שורה, get) לכל שורה לא ריקה. get(key) = ערך העמודה, או "" אם אין."""
     header = [_clean(c.value) for c in ws[1]]
-    idx = {key: next((i for i, h in enumerate(header) if h in names), None) for key, names in _PRODUCT_COLS.items()}
-    for key in ("name", "location"):
-        if idx[key] is None:
-            problems.append(f"בלשונית '{PRODUCTS_SHEET}' חסרה עמודה בשם '{_PRODUCT_COLS[key][0]}'")
-    if idx["name"] is None or idx["location"] is None:
-        return []
-
-    products, seen = [], set()
+    idx = {key: next((i for i, h in enumerate(header) if h in names), None) for key, names in cols.items()}
+    missing = [key for key in required if idx[key] is None]
+    for key in missing:
+        problems.append(f"בלשונית '{ws.title}' חסרה עמודה בשם '{cols[key][0]}'")
+    if missing:
+        return
     for n, row in enumerate(ws.iter_rows(min_row=2, values_only=True), 2):
-        get =lambda key: _clean(row[idx[key]]) if idx[key] is not None and idx[key] < len(row) else ""  # noqa: E731
         if not any(_clean(v) for v in row):
             continue
+        # שורות "דוגמה: ..." בתבנית הן הסבר, לא נתונים
+        if _clean(row[idx[required[0]]] if idx[required[0]] < len(row) else "").startswith("דוגמה"):
+            continue
+        yield n, lambda key, row=row: _clean(row[idx[key]]) if idx[key] is not None and idx[key] < len(row) else ""
+
+
+def _check_zone(what: str, loc: str, smap: StoreMap | None, problems: list[str]) -> bool:
+    if not loc:
+        problems.append(f"{what}: לא נבחר אזור")
+        return False
+    if smap and loc not in smap.zones:
+        hint = difflib.get_close_matches(loc, sorted(smap.zones), n=1)
+        problems.append(f"{what} משויך לאזור '{loc}' שלא קיים בציור"
+                        + (f" (אולי התכוונתם ל'{hint[0]}'?)" if hint else ""))
+        return False
+    return True
+
+
+def _xlsx_departments(ws, smap: StoreMap | None, problems: list[str]) -> list[Department]:
+    departments, seen = [], set()
+    for n, get in _rows(ws, _DEPARTMENT_COLS, ("name", "location"), problems):
+        name, loc = get("name") or get("location"), get("location")
+        if not name:
+            problems.append(f"מחלקות, שורה {n}: חסר שם מחלקה")
+            continue
+        if not _check_zone(f"המחלקה '{name}'", loc, smap, problems):
+            continue
+        if name in seen:
+            problems.append(f"המחלקה '{name}' מופיעה יותר מפעם אחת")
+            continue
+        seen.add(name)
+        departments.append(Department(name, loc, [e for e in _LIST_SEP.split(get("examples")) if e]))
+    if not departments and not problems:
+        problems.append(f"הלשונית '{ws.title}' ריקה: הגדירו לפחות מחלקה אחת")
+    return departments
+
+
+def _xlsx_products(ws, smap: StoreMap | None, problems: list[str]) -> list[Product]:
+    products, seen = [], set()
+    for n, get in _rows(ws, _PRODUCT_COLS, ("name", "location"), problems):
         name, loc = get("name"), get("location")
         if not name:
-            problems.append(f"מוצרים, שורה {n}: חסר שם מוצר")
+            problems.append(f"{ws.title}, שורה {n}: חסר שם מוצר")
             continue
-        if not loc:
-            problems.append(f"המוצר '{name}': לא נבחר אזור")
-            continue
-        if smap and loc not in smap.zones:
-            hint = difflib.get_close_matches(loc, sorted(smap.zones), n=1)
-            problems.append(f"המוצר '{name}' משויך לאזור '{loc}' שלא קיים בציור"
-                            + (f" (אולי התכוונתם ל'{hint[0]}'?)" if hint else ""))
+        if not _check_zone(f"המוצר '{name}'", loc, smap, problems):
             continue
         pid = get("id") or f"R{n}"
         if pid in seen:
@@ -347,26 +419,33 @@ def _xlsx_products(ws, smap: StoreMap | None, problems: list[str]) -> list[Produ
         seen.add(pid)
         products.append(Product(pid, name, [a.strip() for a in get("aliases").split("|") if a.strip()],
                                 get("category") or loc, loc, get("last").lower() in _YES))
-    if not products and not problems:
-        problems.append(f"הלשונית '{PRODUCTS_SHEET}' ריקה")
     return products
 
 
-def load_store_xlsx(path: Path) -> tuple[list[Product], StoreMap]:
+def load_store_xlsx(path: Path) -> tuple[StoreRAG, StoreMap]:
     """טוען חנות מקובץ אקסל. זורק StoreFileError עם כל הבעיות שנמצאו, בעברית פשוטה."""
     from openpyxl import load_workbook
 
     path = Path(path)
     wb = load_workbook(path, data_only=True)
-    missing = [s for s in (MAP_SHEET, PRODUCTS_SHEET) if s not in wb.sheetnames]
+    products_sheet = next((s for s in (PRODUCTS_SHEET, LEGACY_PRODUCTS_SHEET) if s in wb.sheetnames), None)
+    missing = [s for s in (MAP_SHEET,) if s not in wb.sheetnames]
+    if DEPARTMENTS_SHEET not in wb.sheetnames and products_sheet != LEGACY_PRODUCTS_SHEET:
+        missing.append(DEPARTMENTS_SHEET)
     if missing:
         raise StoreFileError(path, [f"חסרה לשונית בשם '{s}'" for s in missing])
     problems: list[str] = []
     smap = _grid_map(wb[MAP_SHEET], path.parent.name, problems)
-    products = _xlsx_products(wb[PRODUCTS_SHEET], smap, problems)
+    products = _xlsx_products(wb[products_sheet], smap, problems) if products_sheet else []
+    if DEPARTMENTS_SHEET in wb.sheetnames:
+        departments = _xlsx_departments(wb[DEPARTMENTS_SHEET], smap, problems)
+    else:
+        departments = departments_from_products(products)
+        if not departments and not problems:
+            problems.append(f"הלשונית '{products_sheet}' ריקה")
     if problems:
         raise StoreFileError(path, problems)
-    return products, smap
+    return StoreRAG(departments, products), smap
 
 
 # ---------------------------------------------------------------- טעינת חנות
@@ -383,12 +462,13 @@ def load_store(name: str) -> tuple[StoreRAG, StoreMap]:
     if name not in _STORE_CACHE:
         d = config.STORES_DIR / name
         if (d / STORE_XLSX).exists():
-            products, smap = load_store_xlsx(d / STORE_XLSX)
+            _STORE_CACHE[name] = load_store_xlsx(d / STORE_XLSX)
         elif (d / "map.json").exists():
-            products, smap = read_catalog_csv(d / "catalog.csv"), StoreMap.from_json(d / "map.json")
+            products = read_catalog_csv(d / "catalog.csv")
+            _STORE_CACHE[name] = (StoreRAG(departments_from_products(products), products),
+                                  StoreMap.from_json(d / "map.json"))
         else:
             raise FileNotFoundError(f"החנות '{name}' לא נמצאה. חנויות זמינות: {', '.join(list_stores())}")
-        _STORE_CACHE[name] = (StoreRAG(products), smap)
     return _STORE_CACHE[name]
 
 

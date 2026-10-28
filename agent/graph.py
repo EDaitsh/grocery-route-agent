@@ -73,7 +73,7 @@ def auto_hitl(payload: dict):
     if payload["kind"] == "clarify":
         out = {}
         for q in payload["questions"]:
-            out[str(q["idx"])] = q["options"][0]["id"] if q["type"] == "choose" else "yes"
+            out[str(q["idx"])] = q["options"][0]["id"]
         return out
     return False
 

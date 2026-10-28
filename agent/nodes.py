@@ -9,7 +9,7 @@ import re
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Optional, TypedDict
+from typing import Callable, TypedDict
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import interrupt
@@ -25,8 +25,8 @@ class AgentState(TypedDict, total=False):
     blocked: bool
     block_reason: str
     items: list[dict]          # פריטים אחרי נרמול: {idx, text, qty, note}
-    candidates: dict           # idx -> [מועמדים מה-RAG]
-    resolved: list[dict]       # פריטים שמופו למוצר/מיקום
+    candidates: dict           # idx -> {"products": [...], "departments": [...]} מה-RAG
+    resolved: list[dict]       # פריטים ששויכו למיקום (דרך מחלקה או מוצר ידוע)
     pending: list[dict]        # פריטים שדורשים הבהרה (Gate)
     not_found: list[str]
     route: dict
@@ -129,7 +129,9 @@ PARSE_SYSTEM = """אתה מנרמל רשימות קניות בעברית.
 def parse_list(state: AgentState, config: RunnableConfig) -> dict:
     res = _llm(config).json("parse", PARSE_SYSTEM, json.dumps({"text": state["user_input"]}, ensure_ascii=False))
     items = []
-    for i, it in enumerate(res.get("items", [])):
+    for i, it in enumerate(res if isinstance(res, list) else res.get("items", [])):
+        if not isinstance(it, dict):
+            continue
         name = str(it.get("name", "")).strip()
         if name:
             qty = it.get("qty")
@@ -140,84 +142,119 @@ def parse_list(state: AgentState, config: RunnableConfig) -> dict:
     return {"items": items[:80]}
 
 
-# ================================================================ 3. שליפה מהקטלוג [CODE / RAG]
+# ================================================================ 3. שליפה מהחנות [CODE / RAG]
+# מוצר ידוע נשלח ל-LLM רק בהתאמה חזקה לשם או לכינוי (גם עם שגיאת כתיב: "סולות" = 0.85).
+# מילה חלקית נשארת מתחת לסף ("חלב" מול "חלב סויה" = 0.71), כי מודלים חלשים "תופסים" כל מועמד
+# שמקבלים, גם בניגוד להוראות. ה-LLM יכול לבחור רק מוצר שנשלח אליו, כך שזו בקרה בקוד.
+KNOWN_PRODUCT_MIN_SCORE = 0.75
+
+
 @node("RAG_Lookup")
 def rag_lookup(state: AgentState, config: RunnableConfig) -> dict:
     rag, _ = _store(config)
     cands = {}
     for it in state.get("items", []):
         query = f"{it['text']} {it['note']}".strip()
-        cands[str(it["idx"])] = rag.search(query, k=4)
+        cands[str(it["idx"])] = {
+            "products": [c for c in rag.search(query, k=3) if c["score"] >= KNOWN_PRODUCT_MIN_SCORE],
+            "departments": rag.search_departments(query, k=3)}
     return {"candidates": cands}
 
 
-# ================================================================ 4. התאמה וסיווג [LLM]
-MATCH_SYSTEM = """אתה מתאים פריטים מרשימת קניות למוצרים בקטלוג של חנות.
-לכל פריט קיבלת מועמדים שנשלפו מהקטלוג (id, name, category, score).
+# ================================================================ 4. שיוך למחלקה [LLM]
+MATCH_SYSTEM = """אתה משייך פריטים מרשימת קניות למקום שלהם בחנות.
+קיבלת:
+- departments: כל המחלקות בחנות, ולכל אחת דוגמאות למה שנמכר בה. הדוגמאות חלקיות - שייך גם מוצרים
+  שלא מופיעים בהן, לפי ידע כללי על סופרמרקטים.
+- items: הפריטים. לכל פריט known_products = מוצרים שהחנות הגדירה במפורש (לרוב כי הם במיקום מיוחד),
+  ו-department_hints = מחלקות שנשלפו לפי דמיון בשם (רמז בלבד).
 
 כללים:
-- status="match": המועמד הוא בבירור המוצר שהמשתמש התכוון אליו. החזר product_id שלו.
-- status="ambiguous": כמה מועמדים מתאימים באותה מידה (למשל "חלב" -> חלב 3% או חלב 1%)
-  והמשתמש לא ציין איזה. החזר options = רשימת ה-id המתאימים (2-3).
-- status="not_found": אף מועמד אינו המוצר המבוקש (דמיון באותיות בלבד אינו התאמה).
-  במקרה זה החזר likely_category = המחלקה הסבירה ביותר מתוך רשימת המחלקות, או null.
-- confidence: מספר בין 0 ל-1.
-- אסור להחזיר id שלא מופיע ברשימת המועמדים של אותו פריט.
+- status="product": אחד מ-known_products הוא אותו מוצר בדיוק (או שם נרדף שלו). מוצר ידוע גובר על שיוך למחלקה.
+  החזר product_id. מילה משותפת אינה התאמה: "חלב" או "חלב 3%" אינם "חלב סויה", ו"מיץ" אינו "מסטיק".
+  ברוב המקרים אף מוצר ידוע לא מתאים, וזה תקין.
+- status="ambiguous": כמה מ-known_products מתאימים באותה מידה והמשתמש לא ציין איזה. החזר options (2-3 id).
+- status="department": אין מוצר ידוע מתאים (דמיון באותיות בלבד אינו התאמה). החזר department = המחלקה
+  שבה הפריט נמכר בסבירות הגבוהה ביותר, ואם יש ספק - alternatives = עד 2 מחלקות אפשריות נוספות.
+- status="not_sold": הפריט לא נמכר בסופרמרקט בכלל.
+- melts: true רק למוצר שנמס מהר מחוץ למקפיא (גלידה, ארטיק), אחרת false.
+- confidence: מספר בין 0 ל-1 - עד כמה אתה בטוח במיקום.
+- מותר להחזיר רק id מתוך known_products של אותו פריט, ורק שמות מחלקות בדיוק כפי שהופיעו ב-departments.
 
 החזר JSON בלבד:
-{"matches": [{"idx": 0, "status": "match", "product_id": "P001", "options": [], "likely_category": null, "confidence": 0.95}]}"""
+{"matches": [{"idx": 0, "status": "department", "product_id": null, "options": [], "department": "מוצרי חלב", "alternatives": [], "melts": false, "confidence": 0.95}]}"""
 
 
 @node("Match_Classify")
 def match_items(state: AgentState, config: RunnableConfig) -> dict:
     rag, _ = _store(config)
-    categories = sorted({p.category for p in rag.products.values()})
-    payload = {"categories": categories, "items": [
-        {"idx": it["idx"], "text": it["text"], "note": it["note"],
-         "candidates": [{k: c[k] for k in ("id", "name", "category", "score")}
-                        for c in state["candidates"].get(str(it["idx"]), [])]}
-        for it in state.get("items", [])]}
+    payload = {
+        "departments": [{"name": d.name, "examples": d.examples[:15]} for d in rag.departments.values()],
+        "items": [{"idx": it["idx"], "text": it["text"], "note": it["note"],
+                   "known_products": [{k: c[k] for k in ("id", "name", "score")} for c in cands["products"]],
+                   "department_hints": [{k: c[k] for k in ("name", "score")} for c in cands["departments"]]}
+                  for it in state.get("items", []) for cands in [state["candidates"][str(it["idx"])]]]}
     res = _llm(config).json("match", MATCH_SYSTEM, json.dumps(payload, ensure_ascii=False))
-    by_idx = {int(m.get("idx", -1)): m for m in res.get("matches", []) if str(m.get("idx", "")).lstrip("-").isdigit()}
+    # יש מודלים שמחזירים את הרשימה עצמה במקום {"matches": [...]}
+    matches = res if isinstance(res, list) else res.get("matches", [])
+    by_idx = {int(m.get("idx", -1)): m for m in matches
+              if isinstance(m, dict) and str(m.get("idx", "")).lstrip("-").isdigit()}
 
     resolved, pending, not_found = [], [], []
     for it in state.get("items", []):
-        cand_ids = [c["id"] for c in state["candidates"].get(str(it["idx"]), [])]
+        cands = state["candidates"][str(it["idx"])]
         m = by_idx.get(it["idx"], {})
-        status = m.get("status", "not_found")
+        status = m.get("status", "department")
         conf = float(m.get("confidence") or 0)
-        pid = m.get("product_id")
-        options = [o for o in (m.get("options") or []) if o in cand_ids]
+        melts = bool(m.get("melts"))
 
-        # בקרת איכות על פלט ה-LLM: id מומצא -> לא נחשב התאמה
-        if status == "match" and pid not in cand_ids:
-            status, options = "ambiguous", cand_ids[:3]
-        if status == "match" and conf >= cfg.MATCH_CONFIDENCE_MIN:
-            resolved.append(_resolved_entry(rag.get(pid), it))
-        elif status in ("match", "ambiguous") and (options or cand_ids):
-            pending.append({"type": "choose", "item": it,
-                            "options": [rag.get(o).as_dict() for o in (options or cand_ids[:3])]})
+        if status == "not_sold":
+            not_found.append(it["text"])
+            continue
+
+        if status in ("product", "ambiguous"):
+            # בקרת איכות על פלט ה-LLM: id מומצא לא נחשב, והפריט ממשיך לשיוך למחלקה
+            prod_ids = {c["id"] for c in cands["products"]}
+            options = [o for o in dict.fromkeys(m.get("options") or [m.get("product_id")]) if o in prod_ids]
+            opts = [rag.get(o) for o in options]
+            if status == "product" and opts and conf >= cfg.MATCH_CONFIDENCE_MIN:
+                resolved.append(_product_entry(opts[0], it, melts))
+                continue
+            if len({o.location for o in opts}) == 1:
+                # כל האפשרויות באותו מיקום (חלב 3% / 1% באותו מקרר) - הבחירה לא משנה את המסלול, אין טעם לשאול
+                resolved.append(_spot_entry(opts[0].category, opts[0].location, it,
+                                            melts or any(o.collect_last for o in opts)))
+                continue
+            if opts:
+                pending.append({"type": "choose", "item": it, "melts": melts, "options": [o.as_dict() for o in opts]})
+                continue
+
+        # שיוך למחלקה: רק שמות שקיימים בחנות. אם ה-LLM לא בטוח, מוסיפים את הצעות ה-RAG כאפשרויות
+        deps = [d for d in dict.fromkeys([m.get("department"), *(m.get("alternatives") or [])]) if rag.department(d)]
+        if not deps or conf < cfg.MATCH_CONFIDENCE_MIN:
+            conf = conf if deps else 0.0
+            deps = list(dict.fromkeys(deps + [c["name"] for c in cands["departments"]]))[:3]
+        if not deps:
+            not_found.append(it["text"])
+            continue
+        options = [rag.department(d) for d in deps]
+        if conf >= cfg.MATCH_CONFIDENCE_MIN or len({d.location for d in options}) == 1:
+            resolved.append(_spot_entry(options[0].name, options[0].location, it, melts))
         else:
-            cat = m.get("likely_category")
-            loc = _category_location(rag, cat)
-            if loc:
-                pending.append({"type": "category_stop", "item": it, "category": cat, "location": loc})
-            else:
-                not_found.append(it["text"])
+            pending.append({"type": "department", "item": it, "melts": melts,
+                            "options": [d.as_dict() for d in options]})
     return {"resolved": resolved, "pending": pending, "not_found": not_found}
 
 
-def _resolved_entry(product, item: dict) -> dict:
-    return {**product.as_dict(), "qty": item.get("qty"), "note": item.get("note", ""), "requested": item["text"]}
+def _product_entry(product, item: dict, melts: bool = False) -> dict:
+    return {**product.as_dict(), "collect_last": product.collect_last or melts,
+            "qty": item.get("qty"), "note": item.get("note", ""), "requested": item["text"]}
 
 
-def _category_location(rag, category: Optional[str]) -> Optional[str]:
-    if not category:
-        return None
-    for p in rag.products.values():
-        if p.category == category:
-            return p.location
-    return None
+def _spot_entry(category: str, location: str, item: dict, melts: bool) -> dict:
+    """פריט שמשויך למקום ולא למוצר מסוים: נשאר בשם שהמשתמש כתב, והוא יבחר את הסוג במדף."""
+    return {"id": None, "name": item["text"], "category": category, "location": location, "collect_last": melts,
+            "qty": item.get("qty"), "note": item.get("note", ""), "requested": item["text"]}
 
 
 # ================================================================ 5. Gate + HITL
@@ -236,31 +273,26 @@ def route_after_gate(state: AgentState) -> str:
 
 @node("HITL_Clarify")
 def clarify(state: AgentState, config: RunnableConfig) -> dict:
-    """עוצר את הגרף ושואל את המשתמש. התשובה: {"<idx>": product_id | "yes" | None}"""
-    _, smap = _store(config)
+    """עוצר את הגרף ושואל את המשתמש. התשובה: {"<idx>": product_id (choose) | שם מחלקה (department) | None}"""
+    rag, smap = _store(config)
     questions = []
     for p in state["pending"]:
-        q = {"idx": p["item"]["idx"], "text": p["item"]["text"], "type": p["type"]}
         if p["type"] == "choose":
-            q["options"] = [{"id": o["id"], "name": o["name"]} for o in p["options"]]
+            options = [{"id": o["id"], "name": o["name"]} for o in p["options"]]
         else:
-            q["category"] = p["category"]
-            q["location_label"] = smap.label(p["location"])
-        questions.append(q)
+            options = [{"id": o["name"], "name": f"{o['name']} ({smap.label(o['location'])})"} for o in p["options"]]
+        questions.append({"idx": p["item"]["idx"], "text": p["item"]["text"], "type": p["type"], "options": options})
 
     answers = interrupt({"kind": "clarify", "questions": questions}) or {}
 
-    rag, _ = _store(config)
     resolved, not_found = list(state.get("resolved", [])), list(state.get("not_found", []))
     for p in state["pending"]:
         ans = answers.get(str(p["item"]["idx"]))
         if p["type"] == "choose" and ans in {o["id"] for o in p["options"]}:
-            resolved.append(_resolved_entry(rag.get(ans), p["item"]))
-        elif p["type"] == "category_stop" and ans == "yes":
-            resolved.append({"id": None, "name": f"{p['item']['text']} (לבדוק במחלקה)", "category": p["category"],
-                             "location": p["location"], "collect_last": False,
-                             "qty": p["item"].get("qty"), "note": p["item"].get("note", ""),
-                             "requested": p["item"]["text"]})
+            resolved.append(_product_entry(rag.get(ans), p["item"], p["melts"]))
+        elif p["type"] == "department" and ans in {o["name"] for o in p["options"]}:
+            d = rag.department(ans)
+            resolved.append(_spot_entry(d.name, d.location, p["item"], p["melts"]))
         else:
             not_found.append(p["item"]["text"])
     return {"resolved": resolved, "pending": [], "not_found": not_found}
@@ -350,7 +382,8 @@ def template_instructions(route: dict) -> str:
         n += 1
         prods = ", ".join(f"{p['name']}" + (f" x{p['qty']}" if p.get("qty") else "") for p in s["products"])
         lines.append(f"{n}. {s['label']}: {prods}" + (" (בסוף, כדי שלא יימס)" if s.get("collect_last") else ""))
-    lines.append(f"{n + 1}. {route['stops'][-1]['label']}")
+    if not route["stops"][-1]["products"]:   # הקופות כבר הופיעו אם יש בהן מוצרים (סוללות)
+        lines.append(f"{n + 1}. {route['stops'][-1]['label']}")
     lines.append(f"מרחק הליכה כולל: כ-{route['total_m']:.0f} מטר.")
     return "\n".join(lines)
 
@@ -359,7 +392,7 @@ def template_instructions(route: dict) -> str:
 @node("Finalize")
 def finalize(state: AgentState, config: RunnableConfig) -> dict:
     if not state.get("route"):
-        text = "לא נמצאו בחנות מוצרים מהרשימה, ולכן לא חושב מסלול."
+        text = "אף פריט מהרשימה לא שויך למקום בחנות, ולכן לא חושב מסלול."
     else:
         text = state.get("instructions", "")
         if state.get("eval_feedback"):
@@ -369,7 +402,7 @@ def finalize(state: AgentState, config: RunnableConfig) -> dict:
         if r["naive_m"] > r["total_m"]:
             text += f"\n(חיסכון של כ-{r['naive_m'] - r['total_m']:.0f} מטר לעומת הליכה לפי סדר הרשימה)"
     if state.get("not_found"):
-        text += "\n\nלא נמצאו בקטלוג החנות: " + ", ".join(state["not_found"])
+        text += "\n\nלא נמצא להם מקום בחנות: " + ", ".join(state["not_found"])
     return {"final_text": text}
 
 

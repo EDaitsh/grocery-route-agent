@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections import Counter
 
 from common import ROOT, base_args, load_json, models_from, write_csv
 
@@ -21,11 +22,10 @@ JUDGE_SYSTEM = ("אתה שופט קפדני שמעריך פלט של אייג'נ
                 "\n\nהחזר JSON בלבד בפורמט שהוגדר.")
 
 
-def judge(judge_llm: LLM, case: dict, state: dict, catalog) -> dict:
-    expected_names = [catalog.get(pid).name for pid in case["expected"]]
+def judge(judge_llm: LLM, case: dict, state: dict) -> dict:
     payload = {
         "shopping_list": case["text"],
-        "expected_products": expected_names,
+        "expected_zones_in_list_order": case["expected"],
         "computed_route": [{"label": s["label"], "products": [p["name"] for p in s["products"]]}
                            for s in (state.get("route") or {}).get("stops", [])],
         "agent_output": state.get("final_text", ""),
@@ -45,8 +45,6 @@ def judge(judge_llm: LLM, case: dict, state: dict, catalog) -> dict:
 def main():
     args = base_args("השוואת מודלים")
     set_reporter((lambda m: None) if args.quiet else print)
-    from agent.tools import load_store
-    catalog, _ = load_store(config.DEFAULT_STORE)
     cases = load_json("test_lists.json")
     judge_llm = LLM(model=config.JUDGE_MODEL, tracker=CostTracker())
 
@@ -59,10 +57,12 @@ def main():
             try:
                 state, tracker = run_agent(case["text"], model=None if args.mock else model)
                 row["seconds"] = round(time.perf_counter() - t0, 2)
-                got = {r["id"] for r in state.get("resolved", []) if r.get("id")}
-                exp = set(case["expected"])
-                row["recall"] = round(len(got & exp) / len(exp), 3)
-                row["precision"] = round(len(got & exp) / len(got), 3) if got else 0.0
+                # השוואה כ-multiset של אזורים: כמה פריטים הגיעו לאזור הנכון (שם הפריט עצמו יכול להשתנות בנרמול)
+                got = Counter(r["location"] for r in state.get("resolved", []))
+                exp = Counter(case["expected"])
+                hit = sum((got & exp).values())
+                row["recall"] = round(hit / sum(exp.values()), 3)
+                row["precision"] = round(hit / sum(got.values()), 3) if got else 0.0
                 row["evaluator_passed"] = not state.get("eval_feedback")
                 row["rewrite_attempts"] = state.get("attempts", 0)
                 row["route_m"] = (state.get("route") or {}).get("total_m")
@@ -70,7 +70,7 @@ def main():
                 row.update(input_tokens=tot["input_tokens"], output_tokens=tot["output_tokens"],
                            cost_actual_usd=round(tot["actual_usd"], 6),
                            cost_theoretical_usd=round(tot["theoretical_usd"], 6))
-                row.update(judge(judge_llm, case, state, catalog))
+                row.update(judge(judge_llm, case, state))
                 row["error"] = ""
             except AgentError as e:
                 row["seconds"] = round(time.perf_counter() - t0, 2)

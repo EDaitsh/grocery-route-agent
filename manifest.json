@@ -1,7 +1,7 @@
 {
   "name": "Grocery Route Agent",
   "version": "1.0.0",
-  "description": "An agent that turns a free-text Hebrew grocery list into the shortest walking route through a specific store. It normalizes the list, matches items to the store catalog via RAG, asks the user to resolve ambiguous items (HITL), computes an optimized route with a graph algorithm, and writes verified step-by-step walking instructions.",
+  "description": "An agent that turns a free-text Hebrew grocery list into the shortest walking route through a specific store. It normalizes the list, assigns each item to a store department (LLM + RAG over the store's departments and a short list of exception products), asks the user only when the uncertainty changes the route (HITL), computes an optimized route with a graph algorithm, and writes verified step-by-step walking instructions.",
   "creator_name": "Esther Daitsh",
   "contact_information": "e.daitsh@gmail.com",
   "release_date": "2026-10-26",
@@ -16,10 +16,10 @@
   ],
   "tasks_capable_of_performing": [
     "Normalizing free-text Hebrew shopping lists (typos, quantities, combined items)",
-    "Matching list items to a store product catalog (RAG)",
-    "Classifying unknown items to a likely store department",
+    "Assigning list items to store departments without a full product catalog (LLM + RAG)",
+    "Handling exception products that are shelved outside their expected department",
     "Computing the shortest in-store route (Dijkstra + 2-opt, melting items like ice cream last)",
-    "Loading a store from a simple Excel file: a map drawn in cells plus a product sheet, with validation messages in Hebrew",
+    "Loading a store from a simple Excel file: a map drawn in cells, a departments sheet and an optional exceptions sheet, with validation messages in Hebrew",
     "Writing verified walking instructions",
     "Maintaining a weekly shopping list across sessions"
   ],

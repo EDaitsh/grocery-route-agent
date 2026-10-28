@@ -14,6 +14,7 @@ from .llm import extract_json
 _OUT_OF_SCOPE = re.compile(r"(מתכון|מזג|שיר|כתוב לי|ספר לי|בדיחה|תרגם|קוד|פייתון|מי זה|מי היה|למה |"
                            r"הסבר|השווה מחיר|כמה עולה|המלצה על|עצה|פוליטי|חדשות)")
 _SPLIT = re.compile(r"[,\n;،]+|\s+ו(?=[א-ת]{2,})")
+_MELTS = re.compile(r"(גלידה|ארטיק|קרטיב|שלגון)")
 
 
 def _parts(text: str) -> list[str]:
@@ -28,7 +29,7 @@ def respond(task: str, user: str) -> str:
     if task == "parse":
         return json.dumps({"items": [_parse_one(p) for p in _parts(data["text"])]}, ensure_ascii=False)
     if task == "match":
-        return json.dumps({"matches": [_match(it, data["categories"]) for it in data["items"]]}, ensure_ascii=False)
+        return json.dumps({"matches": [_match(it) for it in data["items"]]}, ensure_ascii=False)
     if task == "instructions":
         return _instructions(data)
     if task == "judge":
@@ -42,7 +43,8 @@ def _guard(text: str) -> dict:
         return {"in_scope": False, "reason": "בקשה שאינה רשימת קניות"}
     from .tools import load_store
     rag, _ = load_store(config.DEFAULT_STORE)
-    hits = sum(1 for p in _parts(text) if (rag.search(p, 1) or [{"score": 0}])[0]["score"] >= 0.45)
+    hits = sum(1 for p in _parts(text)
+               if max([c["score"] for c in rag.search(p, 1) + rag.search_departments(p, 1)] or [0]) >= 0.45)
     if hits or text.startswith(("איפה", "באיזה מעבר")):
         return {"in_scope": True, "reason": "רשימת מוצרים"}
     return {"in_scope": False, "reason": "לא זוהו מוצרים"}
@@ -56,21 +58,22 @@ def _parse_one(part: str) -> dict:
     return {"name": part.strip(), "qty": qty, "note": ""}
 
 
-def _match(item: dict, categories: list[str]) -> dict:
-    c = item["candidates"]
-    out = {"idx": item["idx"], "status": "not_found", "product_id": None, "options": [],
-           "likely_category": None, "confidence": 0.0}
-    if not c or c[0]["score"] < 0.45:
-        if any(w in item["text"] for w in ("מטאטא", "סמרטוט", "מגב", "דלי")):
-            out["likely_category"] = "ניקיון"
+def _match(item: dict) -> dict:
+    out = {"idx": item["idx"], "status": "not_sold", "product_id": None, "options": [], "department": None,
+           "alternatives": [], "melts": bool(_MELTS.search(item["text"])), "confidence": 0.0}
+    # מוצר ידוע רק בהתאמה חזקה בשם, אחרת שיוך למחלקה לפי הדוגמאות שלה
+    p = item["known_products"]
+    if p and p[0]["score"] >= 0.75:
+        close = [x["id"] for x in p if p[0]["score"] - x["score"] < 0.1]
+        if len(close) > 1:
+            out.update(status="ambiguous", options=close, confidence=0.5)
+        else:
+            out.update(status="product", product_id=p[0]["id"], confidence=p[0]["score"])
         return out
-    top = c[0]["score"]
-    close = [x["id"] for x in c if top - x["score"] < 0.3 and x["score"] >= 0.6
-             and x["category"] == c[0]["category"]]
-    if len(close) > 1:
-        out.update(status="ambiguous", options=close[:3], confidence=0.5)
-    else:
-        out.update(status="match", product_id=c[0]["id"], confidence=min(1.0, top))
+    d = item["department_hints"]
+    if d and d[0]["score"] >= 0.45:
+        out.update(status="department", department=d[0]["name"], confidence=min(1.0, d[0]["score"] + 0.2),
+                   alternatives=[x["name"] for x in d[1:] if d[0]["score"] - x["score"] < 0.15])
     return out
 
 
@@ -83,6 +86,7 @@ def _instructions(data: dict) -> str:
         prods = ", ".join(p["name"] + (f" x{p['qty']}" if p.get("qty") else "") for p in s["products"])
         lines.append(f"{n}. {s['label']} - לאסוף: {prods}"
                      + (" (בסוף המסלול, כדי שלא יימס)" if s.get("collect_last") else ""))
-    lines.append(f"{n + 1}. {data['stops'][-1]['label']}")
+    if not data["stops"][-1]["products"]:
+        lines.append(f"{n + 1}. {data['stops'][-1]['label']}")
     lines.append(f"סה\"כ כ-{data['total_m']:.0f} מטר הליכה.")
     return "\n".join(lines)

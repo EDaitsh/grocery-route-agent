@@ -13,17 +13,22 @@ def main() -> int:
         print(__doc__)
         return 2
     try:
-        products, smap = load_store_xlsx(Path(sys.argv[1].strip('"')))
+        rag, smap = load_store_xlsx(Path(sys.argv[1].strip('"')))
     except StoreFileError as e:
         print(e)
         return 1
-    last = [p.name for p in products if p.collect_last]
+    departments, products = rag.departments.values(), rag.products.values()
     print(f"הקובץ תקין: {smap.name}")
     print(f"- {len(smap.zones)} אזורים: {', '.join(sorted(smap.zones))}")
-    print(f"- {len(products)} מוצרים" + (f" (לאסוף בסוף: {', '.join(last)})" if last else ""))
-    empty = sorted(smap.zones - {p.location for p in products} - {smap.start, smap.end})
+    print(f"- {len(departments)} מחלקות: {', '.join(d.name for d in departments)}")
+    print(f"- {len(products)} מוצרים חריגים" + (f": {', '.join(p.name for p in products)}" if products else ""))
+    no_examples = [d.name for d in departments if not d.examples]
+    if no_examples:
+        print(f"- מומלץ להוסיף דוגמאות למחלקות: {', '.join(no_examples)}")
+    used = {d.location for d in departments} | {p.location for p in products}
+    empty = sorted(smap.zones - used - {smap.start, smap.end})
     if empty:
-        print(f"- שימו לב: אין מוצרים באזורים: {', '.join(empty)}")
+        print(f"- שימו לב: אין מחלקה ואין מוצרים באזורים: {', '.join(empty)}")
     return 0
 
 
